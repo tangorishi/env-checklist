@@ -2,6 +2,16 @@ export interface Config {
   [key: string]: string | number | boolean;
 }
 
+export class PreflightError extends Error {
+  public readonly missing: string[];
+
+  constructor(missing: string[]) {
+    super(missing.join(', '));
+    this.name = 'PreflightError';
+    this.missing = missing;
+  }
+}
+
 export function preflight(requiredKeys: string[]): Config {
   const missing: string[] = [];
   const env: Config = {};
@@ -16,8 +26,7 @@ export function preflight(requiredKeys: string[]): Config {
   }
 
   if (missing.length > 0) {
-    console.error(`\n✈️  [env-preflight] Missing variables: ${missing.join(', ')}`);
-    process.exit(1);
+    throw new PreflightError(missing);
   }
 
   return env;
