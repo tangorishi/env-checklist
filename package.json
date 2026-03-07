@@ -30,6 +30,10 @@
   ],
   "author": "Rishi Joshi",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tangorishi/env-checklist"
+  },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "tsup": "^8.5.1",
