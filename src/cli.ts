@@ -1,61 +1,220 @@
 #!/usr/bin/env node
 import fs from 'fs';
 import path from 'path';
+import { createRequire } from 'module';
 import chalk from 'chalk';
 import dotenv from 'dotenv';
-import { preflight, PreflightError } from './index.js';
+import { preflightSafe, PreflightError } from './index.js';
 
-dotenv.config();
+// ─── Argument parsing ─────────────────────────────────────────────────────────
 
-const cwd = process.cwd();
-const examplePath = path.join(cwd, '.env.example');
-const envPath = path.join(cwd, '.env');
+const args = process.argv.slice(2);
+const FLAGS = {
+  fix:     args.includes('--fix'),
+  verbose: args.includes('--verbose'),
+  help:    args.includes('--help') || args.includes('-h'),
+  version: args.includes('--version') || args.includes('-v'),
+};
 
-// Branded logging helper
-const info = (msg: string) => console.log(`${chalk.cyan.bold('[env-checklist]')} ${msg}`);
+// ─── Version ──────────────────────────────────────────────────────────────────
 
-// Check if .env.example exists (The Blueprint)
-if (!fs.existsSync(examplePath)) {
-  console.error(chalk.red.bold("\n❌ Error: No .env.example file found."));
-  console.log(chalk.dim("This tool requires a .env.example file to know what variables to check for.\n"));
-  process.exit(1);
-}
-
-// Check if .env exists (The Actual Values)
-if (!fs.existsSync(envPath)) {
-  console.warn(chalk.yellow.bold("\n⚠️  Warning: No .env file found."));
-  console.log(chalk.dim("Create a .env file to satisfy the requirements in .env.example.\n"));
-}
-
-// Extract ONLY the keys (ignoring values, comments, and empty lines)
-const content = fs.readFileSync(examplePath, 'utf-8');
-const keys = content
-  .split('\n')
-  .map(line => line.trim())
-  .filter(line => line && !line.startsWith('#'))
-  .map(line => line.split('=')[0].trim());
-
-if (keys.length === 0) {
-  info(chalk.yellow("No variables found in .env.example to validate."));
+if (FLAGS.version) {
+  const require = createRequire(import.meta.url);
+  const pkg = require('../package.json') as { version: string };
+  console.log(`${chalk.cyan.bold('env-checklist')} ${chalk.white(`v${pkg.version}`)}`);
   process.exit(0);
 }
 
-// Run Preflight check
-console.log(chalk.blue.bold("\n✈️  Checking environment variables..."));
+// --path <value>
+const pathFlagIndex = args.indexOf('--path');
+const customPath = pathFlagIndex !== -1 ? args[pathFlagIndex + 1] : null;
 
-try {
-  preflight(keys);
-  console.log(chalk.green.bold("✅ All systems go. Environment is flight-ready.\n"));
-} catch (error) {
-  if (error instanceof PreflightError) {
-    // Known missing-vars error — show each missing key clearly
-    console.error(chalk.red.bold("\n❌ Preflight Failed!"));
-    console.error(chalk.yellow(`Missing variables: ${error.missing.join(', ')}`));
-    console.log(chalk.dim("Please update your .env file to match .env.example.\n"));
+// ─── Help ─────────────────────────────────────────────────────────────────────
+
+if (FLAGS.help) {
+  console.log(`
+${chalk.cyan.bold('✈️  env-checklist')} — preflight check for your environment variables
+
+${chalk.bold('Usage:')}
+  npx env-checklist [options]
+
+${chalk.bold('Options:')}
+  ${chalk.yellow('--verbose')}        Show a status line for every key checked
+  ${chalk.yellow('--fix')}            Auto-generate a .env file from .env.example (placeholder values)
+  ${chalk.yellow('--path <file>')}    Use a custom .env.example path (useful in monorepos)
+  ${chalk.yellow('--version, -v')}    Show the current version
+  ${chalk.yellow('--help, -h')}       Show this help message
+
+${chalk.bold('Examples:')}
+  npx env-checklist
+  npx env-checklist --verbose
+  npx env-checklist --fix
+  npx env-checklist --path apps/api/.env.example
+`);
+  process.exit(0);
+}
+
+// ─── Resolve paths ────────────────────────────────────────────────────────────
+
+const cwd = process.cwd();
+const examplePath = customPath
+  ? path.resolve(cwd, customPath)
+  : path.join(cwd, '.env.example');
+const envPath = path.join(cwd, '.env');
+
+dotenv.config({ path: envPath });
+
+// ─── Validate .env.example exists ─────────────────────────────────────────────
+
+if (!fs.existsSync(examplePath)) {
+  console.error(chalk.red.bold('\n❌ Error: No .env.example file found.'));
+  if (customPath) {
+    console.log(chalk.dim(`  Looked at: ${examplePath}\n`));
   } else {
-    // Unexpected error — surface it
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(chalk.red.bold("\n💥 Unexpected error:"), message);
+    console.log(chalk.dim('  This tool requires a .env.example file to know what variables to check for.\n'));
   }
+  process.exit(1);
+}
+
+// ─── Parse .env.example ───────────────────────────────────────────────────────
+
+const content = fs.readFileSync(examplePath, 'utf-8');
+const lines = content.split('\n').map(l => l.trim());
+
+const required: string[] = [];
+const optional: string[] = [];
+
+for (const line of lines) {
+  if (!line || line.startsWith('#')) continue;
+
+  // Lines marked with "# optional" comment are treated as optional
+  // e.g.  SENTRY_DSN=   # optional
+  const isOptional = line.toLowerCase().includes('# optional');
+  const key = line.split('=')[0].trim();
+
+  if (!key) continue;
+  if (isOptional) optional.push(key);
+  else required.push(key);
+}
+
+if (required.length === 0 && optional.length === 0) {
+  console.log(chalk.yellow(`${chalk.cyan.bold('[env-checklist]')} No variables found in .env.example to validate.`));
+  process.exit(0);
+}
+
+// ─── --fix mode ───────────────────────────────────────────────────────────────
+
+if (FLAGS.fix) {
+  if (fs.existsSync(envPath)) {
+    console.log(chalk.yellow.bold('\n⚠️  .env already exists — skipping to avoid overwriting your values.'));
+    console.log(chalk.dim('  Delete your .env and re-run with --fix to regenerate.\n'));
+    process.exit(0);
+  }
+
+  const allKeys = [...required, ...optional];
+  const envContent = [
+    '# Auto-generated by env-checklist --fix',
+    '# Fill in the values below before starting your app.',
+    '',
+    ...required.map(k => `${k}=`),
+    ...(optional.length > 0
+      ? ['', '# Optional', ...optional.map(k => `${k}=  # optional`)]
+      : []),
+  ].join('\n');
+
+  fs.writeFileSync(envPath, envContent, 'utf-8');
+  console.log(chalk.green.bold('\n✅ .env file created from .env.example.'));
+  console.log(chalk.dim(`  ${allKeys.length} variable(s) scaffolded. Fill in the values before launching.\n`));
+  process.exit(0);
+}
+
+// ─── Warn if no .env ──────────────────────────────────────────────────────────
+
+if (!fs.existsSync(envPath)) {
+  console.warn(chalk.yellow.bold('\n⚠️  Warning: No .env file found.'));
+  console.log(chalk.dim('  Run with --fix to auto-generate one, or create it manually.\n'));
+}
+
+// ─── Run preflight check ──────────────────────────────────────────────────────
+
+console.log(chalk.blue.bold('\n✈️  Checking environment variables...'));
+if (customPath) console.log(chalk.dim(`  Using: ${examplePath}`));
+
+const result = preflightSafe({ required, optional });
+
+// ─── Verbose table output ─────────────────────────────────────────────────────
+
+if (FLAGS.verbose) {
+  console.log('');
+
+  const allChecked = [
+    ...required.map(k => ({ key: k, type: 'required' as const })),
+    ...optional.map(k => ({ key: k, type: 'optional' as const })),
+  ];
+
+  const maxLen = Math.max(...allChecked.map(e => e.key.length), 10);
+
+  console.log(
+    chalk.dim('  ' + 'KEY'.padEnd(maxLen + 2) + 'TYPE'.padEnd(12) + 'STATUS')
+  );
+  console.log(chalk.dim('  ' + '─'.repeat(maxLen + 26)));
+
+  for (const { key, type } of allChecked) {
+    const isPresent =
+      type === 'required'
+        ? result.present.includes(key)
+        : result.optionalPresent.includes(key);
+
+    const status = isPresent
+      ? chalk.green('✅ present')
+      : type === 'optional'
+      ? chalk.dim('➖ not set')
+      : chalk.red('❌ missing');
+
+    const typeLabel =
+      type === 'optional' ? chalk.dim('optional') : chalk.white('required');
+
+    console.log(`  ${key.padEnd(maxLen + 2)}${typeLabel.padEnd(20)}${status}`);
+  }
+
+  console.log('');
+}
+
+// ─── Summary ──────────────────────────────────────────────────────────────────
+
+const totalChecked = required.length + optional.length;
+const totalPassed  = result.present.length + result.optionalPresent.length;
+const totalFailed  = result.missing.length;
+
+if (result.ok) {
+  console.log(chalk.green.bold('✅ All systems go. Environment is flight-ready.'));
+  console.log(
+    chalk.dim(`   ${totalPassed}/${totalChecked} variable(s) present`) +
+    (result.optionalMissing.length > 0
+      ? chalk.dim(` · ${result.optionalMissing.length} optional not set`)
+      : '')
+  );
+  console.log('');
+} else {
+  console.error(chalk.red.bold('\n❌ Preflight Failed!'));
+
+  // Missing required — table
+  console.log('');
+  console.log(chalk.red('  Missing required variables:'));
+  for (const key of result.missing) {
+    console.log(`    ${chalk.red('✖')} ${chalk.yellow(key)}`);
+  }
+
+  // Summary line
+  console.log('');
+  console.log(
+    chalk.dim(`  ${result.present.length} passed · `) +
+    chalk.red.bold(`${totalFailed} failed`) +
+    chalk.dim(` · ${totalChecked} total`)
+  );
+
+  console.log(chalk.dim('\n  Please update your .env file to match .env.example.\n'));
+  console.log(chalk.dim('  Tip: run with --fix to auto-generate a .env scaffold.\n'));
+
   process.exit(1);
 }
