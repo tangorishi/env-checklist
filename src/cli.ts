@@ -4,6 +4,7 @@ import path from 'path';
 import chalk from 'chalk';
 import dotenv from 'dotenv';
 import { preflight } from './index.js';
+import { parseEnvKeys } from './utils.js';
 
 // Branded logging helper
 const info = (msg: string) => console.log(`${chalk.cyan.bold('[env-checklist]')} ${msg}`);
@@ -30,11 +31,7 @@ function main(): void {
 
   // Extract ONLY the keys (ignoring values, comments, and empty lines)
   const content = fs.readFileSync(examplePath, 'utf-8');
-  const keys = content
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line.length > 0 && !line.startsWith('#'))
-    .map(line => line.split('=')[0].trim());
+  const keys = parseEnvKeys(content);
 
   if (keys.length === 0) {
     info(chalk.yellow("No variables found in .env.example to validate."));
