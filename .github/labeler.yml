@@ -1,0 +1,17 @@
+# .github/labeler.yml
+documentation:
+  - changed-files:
+      - any-glob-to-any-file: 'README.md'
+
+logic:
+  - changed-files:
+      - any-glob-to-any-file: 'src/**/*'
+
+configuration:
+  - changed-files:
+      - any-glob-to-any-file: 'package.json'
+      - any-glob-to-any-file: 'tsup.config.ts'
+
+github-actions:
+  - changed-files:
+      - any-glob-to-any-file: '.github/workflows/**/*'
