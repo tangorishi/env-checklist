@@ -35,7 +35,7 @@
     "url": "https://github.com/tangorishi/env-checklist"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@types/node": "^25.9.2",
     "tsup": "^8.5.1",
     "typescript": "^5.0.0",
     "vitest": "^4.0.18"
