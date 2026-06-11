@@ -20,7 +20,8 @@ export class PreflightError extends Error {
   public readonly missing: string[];
 
   constructor(missing: string[]) {
-    super(missing.join(', '));
+    const message = `Missing required environment variables: ${missing.join(", ")}. Please ensure these are set in your environment or configuration.`;
+    super(message);
     this.name = 'PreflightError';
     this.missing = missing;
   }
@@ -71,7 +72,7 @@ export function preflightSafe(input: string[] | PreflightOptions): PreflightSafe
   };
 }
 
-// ─── Internal helpers ─────────────────────────────────────────────────────────
+//  Internal helpers 
 
 function normalizeInput(input: string[] | PreflightOptions): Required<PreflightOptions> {
   if (Array.isArray(input)) {
